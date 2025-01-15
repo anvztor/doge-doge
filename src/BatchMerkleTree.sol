@@ -59,8 +59,35 @@ contract BatchMerkleTree {
     ) public view returns (bool) {
         require(batchIndex < batchCount, "Batch index out of bounds");
         
-        bytes32 batchRoot = computeMerkleRoot(batches[batchIndex]);
-        return MerkleProof.verify(proof, batchRoot, headerHash);
+        bytes32[] memory leaves = batches[batchIndex];
+        require(leaves.length > 0, "Batch not found");
+        
+        // Find the leaf index
+        uint256 leafIndex;
+        bool found = false;
+        for (uint256 i = 0; i < leaves.length; i++) {
+            if (leaves[i] == headerHash) {
+                leafIndex = i;
+                found = true;
+                break;
+            }
+        }
+        require(found, "Header not found in batch");
+        
+        // Verify the Merkle proof
+        bytes32 computedHash = headerHash;
+        uint256 index = leafIndex;
+        
+        for (uint256 i = 0; i < proof.length; i++) {
+            if (index % 2 == 0) {
+                computedHash = hashPair(computedHash, proof[i]);
+            } else {
+                computedHash = hashPair(proof[i], computedHash);
+            }
+            index = index / 2;
+        }
+        
+        return computedHash == root;
     }
 
     /**
@@ -68,7 +95,7 @@ contract BatchMerkleTree {
      * @param leaves Array of leaf hashes
      * @return Merkle root
      */
-    function computeMerkleRoot(bytes32[] memory leaves) internal pure returns (bytes32) {
+    function computeMerkleRoot(bytes32[] memory leaves) public pure returns (bytes32) {
         require(leaves.length > 0, "Empty leaves");
         
         if (leaves.length == 1) {
@@ -76,22 +103,30 @@ contract BatchMerkleTree {
         }
 
         uint256 n = leaves.length;
-        uint256 offset = 0;
+        bytes32[] memory currentLevel = new bytes32[](n);
+        for (uint256 i = 0; i < n; i++) {
+            currentLevel[i] = leaves[i];
+        }
 
-        while (n > 0) {
-            for (uint256 i = 0; i < n - 1; i += 2) {
-                leaves[offset + i/2] = hashPair(leaves[offset + i], leaves[offset + i + 1]);
+        while (n > 1) {
+            uint256 i = 0;
+            uint256 j = 0;
+            
+            while (i < n) {
+                if (i + 1 < n) {
+                    currentLevel[j] = hashPair(currentLevel[i], currentLevel[i + 1]);
+                    i += 2;
+                } else {
+                    currentLevel[j] = currentLevel[i];
+                    i++;
+                }
+                j++;
             }
             
-            if (n % 2 == 1) {
-                leaves[offset + (n-1)/2] = leaves[offset + n - 1];
-            }
-            
-            offset += n/2;
-            n = (n + 1) / 2;
+            n = j;
         }
         
-        return leaves[0];
+        return currentLevel[0];
     }
 
     /**
@@ -100,7 +135,10 @@ contract BatchMerkleTree {
      * @param b Second leaf
      * @return Hash of the two leaves
      */
-    function hashPair(bytes32 a, bytes32 b) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(a < b ? abi.encodePacked(a, b) : abi.encodePacked(b, a)));
+    function hashPair(bytes32 a, bytes32 b) public pure returns (bytes32) {
+        if (a < b) {
+            return keccak256(abi.encodePacked(a, b));
+        }
+        return keccak256(abi.encodePacked(b, a));
     }
 }
