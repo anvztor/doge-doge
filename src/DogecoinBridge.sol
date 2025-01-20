@@ -3,15 +3,20 @@ pragma solidity ^0.8.19;
 
 import "./DogecoinValidator.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/extensions/draft-IERC20Permit.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+
+/**
+ * @dev Interface for minting wrapped tokens
+ */
+interface IERC20Mintable is IERC20 {
+    function mint(address to, uint256 amount) external returns (bool);
+}
 
 /**
  * @title DogecoinBridge
  * @dev Bridge contract for transferring Dogecoin to Ethereum through SPV proofs
  */
-contract DogecoinBridge is Ownable, Pausable {
+contract DogecoinBridge is Ownable {
     // The validator contract
     DogecoinValidator public immutable validator;
     
@@ -38,6 +43,7 @@ contract DogecoinBridge is Ownable, Pausable {
     // Events
     event BridgeInitiated(
         bytes32 indexed txHash,
+        uint256 indexed txIndex,
         address indexed recipient,
         uint256 amount,
         uint256 blockHeight
@@ -45,6 +51,7 @@ contract DogecoinBridge is Ownable, Pausable {
     
     event BridgeCompleted(
         bytes32 indexed txHash,
+        uint256 indexed txIndex,
         address indexed recipient,
         uint256 amount,
         uint256 blockHeight
@@ -88,7 +95,7 @@ contract DogecoinBridge is Ownable, Pausable {
         uint256 batchIndex,
         address recipient,
         uint256 amount
-    ) external whenNotPaused {
+    ) external {
         require(amount > 0 && amount <= maxBridgeAmount, "Invalid amount");
         require(recipient != address(0), "Invalid recipient");
         require(!bridgeTransactions[txHash].processed, "Transaction already processed");
@@ -105,6 +112,12 @@ contract DogecoinBridge is Ownable, Pausable {
             ),
             "Invalid transaction proof"
         );
+
+        // Verify that enough confirmations have passed
+        require(
+            validator.getLatestBlockHeight() >= blockHeight + minConfirmations,
+            "Insufficient confirmations"
+        );
         
         // Store bridge transaction information
         bridgeTransactions[txHash] = BridgeTransaction({
@@ -116,10 +129,12 @@ contract DogecoinBridge is Ownable, Pausable {
         });
         
         // Mint wrapped tokens to the recipient
-        // Note: The actual minting would be handled by the wrapped token contract
-        // which should have minting rights assigned to this bridge contract
+        require(
+            IERC20Mintable(address(wrappedDoge)).mint(recipient, amount),
+            "Minting failed"
+        );
         
-        emit BridgeCompleted(txHash, recipient, amount, blockHeight);
+        emit BridgeCompleted(txHash, txIndex, recipient, amount, blockHeight);
     }
     
     /**
@@ -138,19 +153,5 @@ contract DogecoinBridge is Ownable, Pausable {
     function setMaxBridgeAmount(uint256 _maxBridgeAmount) external onlyOwner {
         require(_maxBridgeAmount > 0, "Invalid max bridge amount");
         maxBridgeAmount = _maxBridgeAmount;
-    }
-    
-    /**
-     * @dev Pause the bridge
-     */
-    function pause() external onlyOwner {
-        _pause();
-    }
-    
-    /**
-     * @dev Unpause the bridge
-     */
-    function unpause() external onlyOwner {
-        _unpause();
     }
 }

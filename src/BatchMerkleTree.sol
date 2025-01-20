@@ -14,6 +14,9 @@ contract BatchMerkleTree {
     // Mapping from batch index to array of block header hashes
     mapping(uint256 => bytes32[]) private batches;
     
+    // Mapping from batch index to batch root
+    mapping(uint256 => bytes32) public batchRoots;
+    
     // Number of batches processed
     uint256 public batchCount;
     
@@ -41,8 +44,21 @@ contract BatchMerkleTree {
         batchRoot = computeMerkleRoot(headerHashes);
         root = batchRoot;
         
+        // Store the batch root
+        batchRoots[batchIndex] = batchRoot;
+        
         emit NewBatchSubmitted(batchIndex, batchRoot);
         return batchRoot;
+    }
+
+    /**
+     * @dev Gets the root hash of a specific batch
+     * @param batchIndex Index of the batch
+     * @return Root hash of the batch
+     */
+    function getBatchRoot(uint256 batchIndex) public view returns (bytes32) {
+        require(batchIndex < batchCount, "Batch index out of bounds");
+        return batchRoots[batchIndex];
     }
 
     /**
@@ -61,6 +77,10 @@ contract BatchMerkleTree {
         
         bytes32[] memory leaves = batches[batchIndex];
         require(leaves.length > 0, "Batch not found");
+        
+        // Get the batch root
+        bytes32 batchRoot = batchRoots[batchIndex];
+        require(batchRoot != bytes32(0), "Batch root not found");
         
         // Find the leaf index
         uint256 leafIndex;
@@ -87,7 +107,7 @@ contract BatchMerkleTree {
             index = index / 2;
         }
         
-        return computedHash == root;
+        return computedHash == batchRoot;
     }
 
     /**

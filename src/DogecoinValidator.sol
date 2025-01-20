@@ -22,11 +22,14 @@ contract DogecoinValidator is Ownable {
     // Mapping from block hash to block height
     mapping(bytes32 => uint256) public blockHeights;
     
+    // Latest block height
+    uint256 public latestBlockHeight;
+    
     // Mapping from transaction hash to processed flag
     mapping(bytes32 => bool) public processedTransactions;
 
     // Events
-    event HeaderBatchSubmitted(uint256 indexed batchIndex, uint256 startHeight);
+    event HeaderBatchSubmitted(uint256 indexed batchIndex, uint256 startHeight, uint256 endHeight);
     event TransactionVerified(bytes32 indexed txHash, uint256 indexed blockHeight);
 
     constructor(address initialOwner, uint256 batchSize) Ownable(initialOwner) {
@@ -77,11 +80,20 @@ contract DogecoinValidator is Ownable {
             bytes32 headerHash = DogecoinHeader.hashBlockHeader(header);
             blockHeights[headerHash] = height;
             headerHashes[i] = headerHash;
+
+            // Update latest block height if necessary
+            if (height > latestBlockHeight) {
+                latestBlockHeight = height;
+            }
         }
 
         // Add headers to batch Merkle tree
         bytes32 batchRoot = batchMerkleTree.submitBatch(headerHashes);
-        emit HeaderBatchSubmitted(batchMerkleTree.batchCount() - 1, startHeight);
+        emit HeaderBatchSubmitted(
+            batchMerkleTree.batchCount() - 1, 
+            startHeight, 
+            startHeight + batchSize - 1
+        );
         
         return batchRoot;
     }
@@ -90,6 +102,7 @@ contract DogecoinValidator is Ownable {
      * @dev Verifies a Dogecoin transaction using SPV proof
      * @param txHash Hash of the transaction to verify
      * @param blockHeight Height of the block containing the transaction
+     * @param txIndex Index of the transaction in the block
      * @param merkleProof Merkle proof for the transaction
      * @param headerProof Proof that the block header is in our batch tree
      * @param batchIndex Index of the batch containing the block header
@@ -97,6 +110,7 @@ contract DogecoinValidator is Ownable {
     function verifyTransaction(
         bytes32 txHash,
         uint256 blockHeight,
+        uint256 txIndex,
         bytes32[] calldata merkleProof,
         bytes32[] calldata headerProof,
         uint256 batchIndex
@@ -105,11 +119,11 @@ contract DogecoinValidator is Ownable {
         
         // Get the block header
         DogecoinHeader.BlockHeader memory header = blockHeaders[blockHeight];
-        require(blockHeights[header.hashBlockHeader()] == blockHeight, "Block header not found");
+        require(blockHeights[DogecoinHeader.hashBlockHeader(header)] == blockHeight, "Block header not found");
         
         // Verify the block header exists in our batch
         require(
-            batchMerkleTree.verifyHeader(batchIndex, header.hashBlockHeader(), headerProof),
+            batchMerkleTree.verifyHeader(batchIndex, DogecoinHeader.hashBlockHeader(header), headerProof),
             "Invalid header proof"
         );
         
@@ -131,5 +145,13 @@ contract DogecoinValidator is Ownable {
      */
     function getBlockHeader(uint256 height) external view returns (DogecoinHeader.BlockHeader memory) {
         return blockHeaders[height];
+    }
+
+    /**
+     * @dev Gets the latest block height
+     * @return Latest block height
+     */
+    function getLatestBlockHeight() external view returns (uint256) {
+        return latestBlockHeight;
     }
 }
